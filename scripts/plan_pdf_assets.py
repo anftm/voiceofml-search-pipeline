@@ -16,6 +16,9 @@ except ImportError:
     import pdf_assets
 
 
+MAX_GITHUB_MATRIX_SHARDS = 256
+
+
 def source_path(item: dict, source_dir: Path | None, assets_repo: str) -> Path:
     if item.get("source_kind") == "generated":
         return Path(hf_hub_download(item["reader_assets_repo"], item["reader_assets_path"],
@@ -70,17 +73,20 @@ def plan(records: list[dict], source_dir: Path | None, assets_repo: str, shard_c
             skipped.append({**item, "status": "skipped", "reason": "native-text-pdf",
                             "strategy": "native-text"})
             continue
-        if item["page_count"] <= pdf_assets.MAX_PAGES_PER_TASK:
+        page_limit = pdf_assets.max_pages_per_task(item)
+        if item["page_count"] <= page_limit:
             ordinary.append(item)
             continue
-        for start in range(1, item["page_count"] + 1, pdf_assets.MAX_PAGES_PER_TASK):
-            end = min(item["page_count"], start + pdf_assets.MAX_PAGES_PER_TASK - 1)
+        for start in range(1, item["page_count"] + 1, page_limit):
+            end = min(item["page_count"], start + page_limit - 1)
             range_tasks.append({**item, "task_key": f"{item['key']}#pages-{start:06d}-{end:06d}",
                                 "page_start": start, "page_end": end,
                                 "range_page_count": end - start + 1})
     shards = pdf_assets.weighted_shards(ordinary, shard_count)
     shards.extend([[task] for task in range_tasks])
     dynamic_shard_count = len(shards)
+    if dynamic_shard_count > MAX_GITHUB_MATRIX_SHARDS:
+        raise ValueError(f"PDF shard count {dynamic_shard_count} exceeds GitHub Actions matrix limit {MAX_GITHUB_MATRIX_SHARDS}")
     return {"version": 1, "kind": "pdf-assets-queue", "shard_count": dynamic_shard_count,
             "shard_ids": list(range(dynamic_shard_count)),
             "ordinary_shard_count": shard_count,

@@ -81,6 +81,48 @@ class PdfAssetsTests(unittest.TestCase):
         shards = pdf_assets.weighted_shards(records, 2)
         self.assertEqual([[item["key"] for item in shard] for shard in shards], [["a", "c"], ["b"]])
 
+    def test_task_page_limit_uses_500_pages_for_regular_files(self):
+        self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 999, "source_bytes": pdf_assets.LARGE_BYTES}), 500)
+
+    def test_task_page_limit_uses_250_pages_for_very_large_files(self):
+        self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 600, "source_bytes": pdf_assets.VERY_LARGE_BYTES}), 250)
+        self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 1000, "source_bytes": pdf_assets.LARGE_BYTES}), 250)
+
+    def test_plan_uses_500_page_ranges_for_regular_large_pdf(self):
+        records = [{"key": "r\0regular.pdf", "repo": "r", "path": "regular.pdf",
+                    "extension": "pdf", "source_extension": "pdf"}]
+        with patch.object(plan_pdf_assets.pdf_assets, "_pages", return_value=600), patch.object(
+                plan_pdf_assets, "source_path", return_value=Path("regular.pdf")), patch.object(
+                plan_pdf_assets.pdf_assets, "digest", return_value=("a" * 64, pdf_assets.LARGE_BYTES)), patch.object(
+                plan_pdf_assets.pdf_assets, "classify_pdf", return_value="scan"):
+            planned = plan_pdf_assets.plan(records, None, "assets", 18, workers=1)
+        tasks = [task for shard in planned["shards"] for task in shard["records"]]
+        self.assertEqual([(task["page_start"], task["page_end"]) for task in tasks], [(1, 500), (501, 600)])
+        self.assertEqual(planned["shard_count"], 20)
+
+    def test_plan_uses_250_page_ranges_for_very_large_pdf(self):
+        records = [{"key": "r\0large.pdf", "repo": "r", "path": "large.pdf",
+                    "extension": "pdf", "source_extension": "pdf"}]
+        with patch.object(plan_pdf_assets.pdf_assets, "_pages", return_value=600), patch.object(
+                plan_pdf_assets, "source_path", return_value=Path("large.pdf")), patch.object(
+                plan_pdf_assets.pdf_assets, "digest", return_value=("a" * 64, pdf_assets.VERY_LARGE_BYTES)), patch.object(
+                plan_pdf_assets.pdf_assets, "classify_pdf", return_value="scan"):
+            planned = plan_pdf_assets.plan(records, None, "assets", 18, workers=1)
+        tasks = [task for shard in planned["shards"] for task in shard["records"]]
+        self.assertEqual([(task["page_start"], task["page_end"]) for task in tasks],
+                         [(1, 250), (251, 500), (501, 600)])
+        self.assertEqual(planned["shard_count"], 21)
+
+    def test_plan_rejects_a_matrix_larger_than_github_limit(self):
+        records = [{"key": "r\0too-large.pdf", "repo": "r", "path": "too-large.pdf",
+                    "extension": "pdf", "source_extension": "pdf"}]
+        with patch.object(plan_pdf_assets.pdf_assets, "_pages", return_value=128500), patch.object(
+                plan_pdf_assets, "source_path", return_value=Path("too-large.pdf")), patch.object(
+                plan_pdf_assets.pdf_assets, "digest", return_value=("a" * 64, pdf_assets.LARGE_BYTES)), patch.object(
+                plan_pdf_assets.pdf_assets, "classify_pdf", return_value="scan"):
+            with self.assertRaisesRegex(ValueError, "exceeds GitHub Actions matrix limit 256"):
+                plan_pdf_assets.plan(records, None, "assets", 18, workers=1)
+
     def test_plan_splits_only_large_caj_into_deterministic_ranges(self):
         records = [{"key": "r\0large.caj", "repo": "r", "path": "large.caj", "source_extension": "caj"},
                    {"key": "r\0normal.pdf", "repo": "r", "path": "normal.pdf", "source_extension": "pdf"}]
