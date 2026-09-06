@@ -44,8 +44,10 @@ def plan(records: list[dict], source_dir: Path | None, assets_repo: str, shard_c
                 raise ValueError(f"invalid page count for {item['key']}")
             source_sha, source_bytes = pdf_assets.digest(source)
             classification = pdf_assets.classify_pdf(source, pages)
+            outline = [] if classification == "native-text" else pdf_assets.extract_pdf_outline(source, pages)
             return {**item, "page_count": pages, "source_sha256": source_sha,
                     "source_bytes": source_bytes, "classification": classification,
+                    "outline": outline,
                     "decision_profile": pdf_assets.PDF_DECISION_PROFILE}
         except (OSError, subprocess.CalledProcessError, ValueError, RuntimeError):
             source_sha = ""

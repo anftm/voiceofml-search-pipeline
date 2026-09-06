@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from huggingface_hub.errors import HfHubHTTPError
+from pypdf import PdfWriter
 
 from scripts import pdf_assets
 from scripts import plan_pdf_assets
@@ -67,6 +68,23 @@ class PdfAssetsTests(unittest.TestCase):
             ppm.write_bytes(b"P6\n# generated\n640 480\n255\n")
             self.assertEqual(pdf_assets._image_dimensions(png), (1234, 1678))
             self.assertEqual(pdf_assets._image_dimensions(ppm), (640, 480))
+
+    def test_extract_pdf_outline_returns_page_and_depth_metadata(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "outlined.pdf"
+            writer = PdfWriter()
+            for _ in range(3):
+                writer.add_blank_page(width=100, height=100)
+            first = writer.add_outline_item("第一章", 0)
+            writer.add_outline_item("第一节", 1, parent=first)
+            writer.add_outline_item("第二章", 2)
+            with path.open("wb") as stream:
+                writer.write(stream)
+            self.assertEqual(pdf_assets.extract_pdf_outline(path, 3), [
+                {"title": "第一章", "page": 1, "depth": 0},
+                {"title": "第一节", "page": 2, "depth": 1},
+                {"title": "第二章", "page": 3, "depth": 0},
+            ])
 
     def test_weighted_shards_use_descending_page_count_and_stable_ties(self):
         records = [{"key": key, "page_count": pages} for key, pages in (
@@ -304,14 +322,18 @@ class PdfAssetsTests(unittest.TestCase):
                           "strategy": "sampled-webp", "source_revision": "1", "source_sha256": "a" * 64,
                           "source_extension": "pdf", "profile": "p", "page_count": 1200,
                           "page_start": start, "page_end": end, "range_page_count": end - start + 1,
+                          "outline": [{"title": "第一章", "page": 1, "depth": 0}],
                           "pages": [{"page": page, "path": f"objects/sha/pages/page-{page:06d}.webp"}
-                                    for page in range(start, end + 1)]}
+                                     for page in range(start, end + 1)]}
                 (bundle / "bundle.json").write_text(json.dumps({"version": 1, "results": [result]}), encoding="utf-8")
                 bundles.append(bundle)
-            results = publish_pdf_assets.merge_bundles(bundles, root / "merged")
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["key"], "r\0large.pdf")
-        self.assertTrue(results[0]["page_manifest"]["path"].endswith("page-manifest.json"))
+            merged_root = root / "merged"
+            results = publish_pdf_assets.merge_bundles(bundles, merged_root)
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["key"], "r\0large.pdf")
+            self.assertTrue(results[0]["page_manifest"]["path"].endswith("page-manifest.json"))
+            manifest = json.loads((merged_root / results[0]["page_manifest"]["path"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["toc"], [{"title": "第一章", "page": 1, "depth": 0}])
 
     def test_merge_bundles_rejects_overlapping_ranges(self):
         with tempfile.TemporaryDirectory() as root:

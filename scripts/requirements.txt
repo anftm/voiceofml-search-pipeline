@@ -5,3 +5,4 @@ hf-xet==1.5.2
 jieba==0.42.1
 Pillow==12.3.0
 msoffcrypto-tool==6.0.0
+pypdf==6.14.2

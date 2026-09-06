@@ -53,7 +53,8 @@ def merge_bundles(bundle_paths: list[Path], output: Path) -> list[dict]:
         identity = ("source_sha256", "source_revision", "source_extension", "profile", "strategy",
                     "render_profile", "decision_profile")
         if any(tuple(entry.get(field) for field in identity) != tuple(entries[0].get(field) for field in identity)
-               or entry.get("page_count") != entries[0].get("page_count") for entry in entries):
+               or entry.get("page_count") != entries[0].get("page_count")
+               or entry.get("outline", []) != entries[0].get("outline", []) for entry in entries):
             raise ValueError(f"conflicting PDF page ranges: {key}")
         statuses = {entry.get("status") for entry in entries}
         if statuses == {"skipped"}:
@@ -87,6 +88,8 @@ def merge_bundles(bundle_paths: list[Path], output: Path) -> list[dict]:
         object_dir = pdf_assets.object_root(result["source_sha256"], key)
         manifest = {"version": 1, "kind": "pdf-pages", "source_sha256": result["source_sha256"],
                     "profile": pdf_assets.PDF_PROFILE, "pages": pages}
+        if ordered[0].get("outline"):
+            manifest["toc"] = ordered[0]["outline"]
         manifest_path = output / object_dir / "page-manifest.json"
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",

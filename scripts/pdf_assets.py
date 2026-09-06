@@ -33,7 +33,10 @@ WEBP_MAX_RATIO = float(os.environ.get("PDF_WEBP_MAX_RATIO", "0.9"))
 MAX_PAGES_PER_TASK = 500
 VERY_LARGE_MAX_PAGES_PER_TASK = 250
 VERY_LARGE_BYTES = 500 * MI
-PDF_PROFILE = f"pdf-pages-v2-{WEBP_QUALITY}-{WEBP_MAX_DIMENSION}-no-upscale"
+MAX_PDF_OUTLINE_ENTRIES = 2000
+MAX_PDF_OUTLINE_TITLE_CHARS = 500
+MAX_PDF_OUTLINE_DEPTH = 32
+PDF_PROFILE = f"pdf-pages-v3-{WEBP_QUALITY}-{WEBP_MAX_DIMENSION}-no-upscale-toc"
 PDF_DECISION_PROFILE = f"pdf-large-v2-{LARGE_BYTES}-whole-book-{SAMPLE_PAGES}"
 SOURCE_PROFILES = {
     "upstream": "pdf-assets-upstream-v1",
@@ -68,6 +71,43 @@ def digest(path: Path) -> tuple[str, int]:
             h.update(chunk)
             size += len(chunk)
     return h.hexdigest(), size
+
+
+def extract_pdf_outline(path: Path, page_count: int) -> list[dict]:
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(path, strict=False)
+        outline = reader.outline
+    except Exception:
+        return []
+
+    entries: list[dict] = []
+
+    def append(items, depth: int = 0) -> None:
+        for item in items or []:
+            if len(entries) >= MAX_PDF_OUTLINE_ENTRIES:
+                return
+            if isinstance(item, list):
+                append(item, min(depth + 1, MAX_PDF_OUTLINE_DEPTH))
+                continue
+            title = str(getattr(item, "title", "") or "").strip()
+            if not title:
+                continue
+            try:
+                page = reader.get_destination_page_number(item) + 1
+            except Exception:
+                continue
+            if not 1 <= page <= page_count:
+                continue
+            entries.append({
+                "title": title[:MAX_PDF_OUTLINE_TITLE_CHARS],
+                "page": page,
+                "depth": min(depth, MAX_PDF_OUTLINE_DEPTH),
+            })
+
+    append(outline)
+    return entries
 
 
 def load_records(search_data: Path, revisions: Path, repo: str = "", extension: str = "pdf") -> list[dict]:
@@ -245,6 +285,9 @@ def build_item(item: dict, source: Path, bundle: Path) -> dict:
     page_end = int(item.get("page_end", pages))
     if not 1 <= page_start <= page_end <= pages:
         raise ValueError("invalid PDF page range")
+    outline = item.get("outline")
+    if not isinstance(outline, list):
+        outline = extract_pdf_outline(source, pages)
     with tempfile.TemporaryDirectory(dir=bundle) as temp:
         sample = sorted(set([page_start, (page_start + page_end) // 2, page_end]))[:max(1, SAMPLE_PAGES)]
         sample_sizes = []
@@ -273,17 +316,19 @@ def build_item(item: dict, source: Path, bundle: Path) -> dict:
         "version": 1, "kind": "pdf-pages", "source_sha256": source_sha,
         "profile": PDF_PROFILE, "pages": page_entries,
     }
+    if outline:
+        page_manifest["toc"] = outline
     if ranged:
         return {**base, "path": "", "status": "ready", "strategy": "sampled-webp", "pdf": metadata,
                 "render_profile": PDF_PROFILE, "decision_profile": PDF_DECISION_PROFILE,
-                "pages": page_entries}
+                "pages": page_entries, "outline": outline}
     manifest_path = bundle / object_dir / "page-manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(page_manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     manifest_sha, manifest_bytes = digest(manifest_path)
     return {**base, "path": "", "status": "ready", "strategy": "sampled-webp", "pdf": metadata,
             "render_profile": PDF_PROFILE, "decision_profile": PDF_DECISION_PROFILE,
-            "pages": page_entries, "page_manifest": {
+            "pages": page_entries, "outline": outline, "page_manifest": {
                 "path": (object_dir / "page-manifest.json").as_posix(),
                 "sha256": manifest_sha, "bytes": manifest_bytes,
             }}
