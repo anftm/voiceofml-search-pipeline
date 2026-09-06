@@ -16,7 +16,7 @@ except ImportError:
     import pdf_assets
 
 
-MAX_GITHUB_MATRIX_SHARDS = 256
+MAX_GITHUB_MATRIX_SHARDS = 240
 
 
 def source_path(item: dict, source_dir: Path | None, assets_repo: str) -> Path:

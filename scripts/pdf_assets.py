@@ -32,7 +32,6 @@ SAMPLE_PAGES = int(os.environ.get("PDF_SAMPLE_PAGES", "3"))
 WEBP_MAX_RATIO = float(os.environ.get("PDF_WEBP_MAX_RATIO", "0.9"))
 MAX_PAGES_PER_TASK = 500
 VERY_LARGE_MAX_PAGES_PER_TASK = 250
-VERY_LARGE_PAGE_COUNT = 2000
 VERY_LARGE_BYTES = 500 * MI
 PDF_PROFILE = f"pdf-pages-v2-{WEBP_QUALITY}-{WEBP_MAX_DIMENSION}-no-upscale"
 PDF_DECISION_PROFILE = f"pdf-large-v2-{LARGE_BYTES}-whole-book-{SAMPLE_PAGES}"
@@ -129,10 +128,9 @@ def queue(records: list[dict], limit: int = 0, checkpoint: int = 0) -> list[dict
 
 
 def max_pages_per_task(item: dict) -> int:
-    """Use smaller ranges for files whose pages or bytes make rendering expensive."""
-    page_count = int(item.get("page_count") or 0)
+    """Use smaller ranges for files whose size makes rendering expensive."""
     source_bytes = int(item.get("source_bytes") or 0)
-    if page_count >= VERY_LARGE_PAGE_COUNT or source_bytes >= VERY_LARGE_BYTES:
+    if source_bytes >= VERY_LARGE_BYTES:
         return VERY_LARGE_MAX_PAGES_PER_TASK
     return MAX_PAGES_PER_TASK
 

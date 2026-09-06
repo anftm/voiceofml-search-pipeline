@@ -87,7 +87,7 @@ class PdfAssetsTests(unittest.TestCase):
     def test_task_page_limit_uses_250_pages_for_very_large_files(self):
         self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 600, "source_bytes": pdf_assets.VERY_LARGE_BYTES}), 250)
         self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 1999, "source_bytes": pdf_assets.LARGE_BYTES}), 500)
-        self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 2000, "source_bytes": pdf_assets.LARGE_BYTES}), 250)
+        self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 20000, "source_bytes": pdf_assets.LARGE_BYTES}), 500)
 
     def test_plan_uses_500_page_ranges_for_regular_large_pdf(self):
         records = [{"key": "r\0regular.pdf", "repo": "r", "path": "regular.pdf",
@@ -121,10 +121,10 @@ class PdfAssetsTests(unittest.TestCase):
                 plan_pdf_assets, "source_path", return_value=Path("too-large.pdf")), patch.object(
                 plan_pdf_assets.pdf_assets, "digest", return_value=("a" * 64, pdf_assets.LARGE_BYTES)), patch.object(
                 plan_pdf_assets.pdf_assets, "classify_pdf", return_value="scan"):
-            with self.assertRaisesRegex(ValueError, "exceeds GitHub Actions matrix limit 256"):
+            with self.assertRaisesRegex(ValueError, "exceeds GitHub Actions matrix limit 240"):
                 plan_pdf_assets.plan(records, None, "assets", 18, workers=1)
 
-    def test_plan_splits_only_large_caj_into_deterministic_ranges(self):
+    def test_plan_splits_large_caj_into_deterministic_ranges(self):
         records = [{"key": "r\0large.caj", "repo": "r", "path": "large.caj", "source_extension": "caj"},
                    {"key": "r\0normal.pdf", "repo": "r", "path": "normal.pdf", "source_extension": "pdf"}]
         with patch.object(plan_pdf_assets.pdf_assets, "_pages", side_effect=[2501, 300]), patch.object(
@@ -136,22 +136,21 @@ class PdfAssetsTests(unittest.TestCase):
         tasks = [task for shard in planned["shards"] for task in shard["records"]]
         ranges = sorted((task["page_start"], task["page_end"]) for task in tasks
                         if task["key"] == "r\0large.caj")
-        self.assertEqual(ranges, [(1, 250), (251, 500), (501, 750), (751, 1000), (1001, 1250),
-                                   (1251, 1500), (1501, 1750), (1751, 2000), (2001, 2250),
-                                   (2251, 2500), (2501, 2501)])
+        self.assertEqual(ranges, [(1, 500), (501, 1000), (1001, 1500), (1501, 2000),
+                                   (2001, 2500), (2501, 2501)])
         self.assertEqual(len([task for task in tasks if task["key"] == "r\0normal.pdf"]), 0)
-        self.assertEqual((planned["total_records"], planned["total_tasks"]), (2, 11))
+        self.assertEqual((planned["total_records"], planned["total_tasks"]), (2, 6))
         self.assertEqual([item["key"] for item in planned["skipped"]], ["r\0normal.pdf"])
         self.assertEqual(planned["ordinary_shard_count"], 18)
-        self.assertEqual(planned["shard_count"], 29)
-        self.assertEqual(planned["shard_ids"], list(range(29)))
+        self.assertEqual(planned["shard_count"], 24)
+        self.assertEqual(planned["shard_ids"], list(range(24)))
         self.assertEqual(
             [shard["index"] for shard in planned["shards"]
              if any("page_start" in task for task in shard["records"])],
-             [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
+             [18, 19, 20, 21, 22, 23],
         )
         self.assertTrue(all(len(shard["records"]) == 1 for shard in planned["shards"][18:]))
-        self.assertEqual(len({task["task_key"] for task in tasks if "task_key" in task}), 11)
+        self.assertEqual(len({task["task_key"] for task in tasks if "task_key" in task}), 6)
         self.assertTrue(all(
             "page_start" not in task
              for shard in planned["shards"][:18]
