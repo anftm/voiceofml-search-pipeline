@@ -86,7 +86,8 @@ class PdfAssetsTests(unittest.TestCase):
 
     def test_task_page_limit_uses_250_pages_for_very_large_files(self):
         self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 600, "source_bytes": pdf_assets.VERY_LARGE_BYTES}), 250)
-        self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 1000, "source_bytes": pdf_assets.LARGE_BYTES}), 250)
+        self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 1999, "source_bytes": pdf_assets.LARGE_BYTES}), 500)
+        self.assertEqual(pdf_assets.max_pages_per_task({"page_count": 2000, "source_bytes": pdf_assets.LARGE_BYTES}), 250)
 
     def test_plan_uses_500_page_ranges_for_regular_large_pdf(self):
         records = [{"key": "r\0regular.pdf", "repo": "r", "path": "regular.pdf",
@@ -169,11 +170,11 @@ class PdfAssetsTests(unittest.TestCase):
                 plan_pdf_assets.pdf_assets, "digest", return_value=("a" * 64, pdf_assets.LARGE_BYTES)), patch.object(
                 plan_pdf_assets.pdf_assets, "classify_pdf", return_value="scan"):
             planned = plan_pdf_assets.plan(records, None, "assets", 18, workers=1)
-        self.assertEqual(planned["total_tasks"], 5)
-        self.assertEqual(planned["shard_count"], 23)
+        self.assertEqual(planned["total_tasks"], 3)
+        self.assertEqual(planned["shard_count"], 21)
         all_tasks = [t for s in planned["shards"] for t in s["records"]]
         self.assertEqual([(t["page_start"], t["page_end"]) for t in all_tasks],
-                         [(1, 250), (251, 500), (501, 750), (751, 1000), (1001, 1200)])
+                         [(1, 500), (501, 1000), (1001, 1200)])
 
     def test_generated_records_pin_reader_assets_revision(self):
         manifest = {"files": {"r\0book.caj": {
